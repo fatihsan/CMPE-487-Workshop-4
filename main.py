@@ -34,6 +34,8 @@ payloadBytes = json.dumps((payload)).encode('utf-8')
 responseBytes = json.dumps((response)).encode('utf-8')
 goodbyeBytes = json.dumps((goodbyeMessage)).encode('utf-8')
 message_to_send=""
+acks_received = []
+
 
 #DISCOVER
 def discover():
@@ -94,7 +96,7 @@ def generate_packet(type_, payload_, serial_, rwnd_, filename_):
     if len(rwnd_) > 0:
         packet["RWND"] = rwnd_
     if type_ == "FILE":
-        packet["NAME"] = filename_
+        packet["FILENAME"] = filename_
     return packet
 
 def read_in_chunks(file_object, chunk_size):
@@ -105,21 +107,24 @@ def read_in_chunks(file_object, chunk_size):
         yield data
 
 
-def get_temp(filename):
+def create_temp(filename):
     if os.path.isfile('{}.txt'.format(str(filename))):
-        with open('{}.txt'.format(str(filename))) as f:
+        with open('{}.txt'.format(str(filename)), "rb") as f:
             shutil.rmtree('{}/{}_temp'.format(get_cwd(), str(filename)))
             os.mkdir('{}_temp'.format(str(filename)))
             os.chdir('{}/{}_temp'.format(get_cwd(), str(filename)))
             index = 0
             for chunk in read_in_chunks(f):
                 hash_ = get_hash(chunk)
-                chunk_file = open('{}_{}.txt'.format(index, hash_), 'w+')
+                chunk_file = open('{}.txt'.format(index), 'w+')
                 chunk_file.write(chunk)
                 chunk_file.close()
                 index = index + 1
-            end = open('{}_end'.format(index), 'w')
+            end = open('{}_end.txt'.format(index), 'w')
             end.close()
+        return True
+    else:
+        return False
 
 
 def request_chunk(filename, serial):
@@ -127,35 +132,46 @@ def request_chunk(filename, serial):
     sock.bind(('', 0))
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     #sock.sendto(payloadBytes, ('<broadcast>', PORT))
-    packet = generate_packet("FILEREQ", "", serial, "")
-    sock.sendto(packet, ('25.255.255.255', PORT))
+    packet = generate_packet("FILEREQ", "", serial, "", filename)
+    packetBytes = json.dumps((packet)).encode('utf-8')
+    sock.sendto(packetBytes, ('25.255.255.255', PORT))
 
 
 def request_file():
+    print("If you want to abort file request, type in ABORT")
     filename = input("Name of the file:")
-    completed_chunks = []
-    hash_values = {} # {index: hash} 
-    # get has values somehow
-    curr_hash = 0
-    #while (not(hash_values['fin'] == curr_hash)):
-    for key in hash_values.keys:
-        request_chunk(filename, key)
+    if filename == "ABORT":
+        pass
+    else:
+        completed_chunks = []
+        hash_values = {} # {index: hash} 
+        # get has values somehow
+        curr_hash = 0
+        #while (not(hash_values['fin'] == curr_hash)):
+        serial = 1
+        timer = time.time()
+        while not os.path.exists('{}_end.txt'.format(incomingData["FILENAME"])):
+            request_chunk(filename, serial)
+            serial = serial + 1
+            if time.time() - timer > 5:
+                print("Couldnt download file.")
+                break
+
+
 
 def send_chunk(incomingData):
-    f = open('{}_temp/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]), "r")
+    f = open('{}_temp/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]), "rb")
     data = f.readlines()
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((incomingData["MY_IP"], PORT))
         packet = generate_packet("FILE", data, incomingData["SERIAL"], "", incomingData["FILENAME"])
         packetBytes = json.dumps((packet)).encode('utf-8')
-        s.send(packetBytes) 
-        resp = s.recv(1024)
-        if resp:
-            print("ack arriveddddd!")
-            print(resp)
-        else:
-            print("ack didnt arrive")  
-
+        for i in range(3):
+            s.send(packetBytes)
+            time.sleep(0.01)
+            if (incomingData["MY_ID"], incomingData["FILENAME"], incomingData["SERIAL"]) is not in acks_received:
+                time.sleep(1)
+            
 
 def respond(incomingData):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -165,7 +181,6 @@ def respond(incomingData):
         # data = s.recv(1024)
         # print(data)
         s.close()
-
 
 
 def send_Message(name, messagePayload):
@@ -258,8 +273,10 @@ def receiveUDP():
                 if incomingData["TYPE"] == "FILEREQ":
                     if (os.path.exists('{}_temp/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]))):
                         send_chunk(incomingData)
-                else:
-                    pass
+                    else:
+                        pass
+                if incomingData["TYPE"] == "ACK":
+                    acks_received.append((incomingData["MY_IP"], incomingData["FILENAME"], incomingData["SERIAL"]))
                 if (incomingData["TYPE"]=="FILE"):
                     if (os.path.exists('{}/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]))):
                         print("ALREADY HAVE THIS CHUNK")
@@ -318,7 +335,17 @@ def showPartners(user_input):
         for user in discoveredUsers:
             if(discoveredUsers[user]['STATUS']=="online"):
                 print(user)
+
+def display_help():
+    print("to exit/stop Chat client at any time please type GOODBYE")
+    print("to show available partners type in SHOW")
+    print("to request a file type in FILE")
+    print("to get the command list, type in HELP")
+
+
 partnerName =""
+display_help()
+
 while(True):
     if (len(discoveredUsers)==0):
         print("no chat partner found yet")
@@ -327,13 +354,16 @@ while(True):
 
     showPartners("SHOW")
     message_to_send =""
-    print("to exit/stop Chat client at any time please type GOODBYE")
-    print("to show available partners type in SHOW")
     partnerName = input("To send a Message type in the Name of a Chat partner")
     checkIfGoodbye(partnerName)
     #print("this is his NAme: "+partnerName)
-    if partnerName in discoveredUsers:
-        print(("please type in your message (to go back to the menu typ in EXIT)"))
+    if partnerName == "FILE":
+        request_file()
+    elif: partnerName == "HELP":
+        display_help()
+    elif partnerName in discoveredUsers:
+        print(("please type in your message (to go back to the menu type in EXIT)"))
+        print(("to request a file, please go back to the menu and type in REQUEST"))
         while(message_to_send!="EXIT"):
 
             message_to_send = input("your message to: "+ partnerName)
