@@ -5,6 +5,8 @@ import time
 from threading import Thread
 import ast
 import select
+import hashlib
+import shutil
 
 def get_ip_address():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -32,7 +34,6 @@ payloadBytes = json.dumps((payload)).encode('utf-8')
 responseBytes = json.dumps((response)).encode('utf-8')
 goodbyeBytes = json.dumps((goodbyeMessage)).encode('utf-8')
 message_to_send=""
-json.dumps()
 
 #DISCOVER
 def discover():
@@ -56,6 +57,104 @@ if(len(discoveredUsers)!=0):
     print("We've found "+ str(len(discoveredUsers)) +" chat partner")
     for key in discoveredUsers:
             print(key)
+
+# every client should have a list of serial numbers of chunks that they have.
+
+# client 1 has all the chunks.
+# client 2 asks for the file, but is halfway there. he has half of them right now.
+# client 3 asks for the same file.
+
+# client 1 says I have all 10
+# client 2 says I have 0 to 4
+# client 3 asks 0 to 4 from client 2, 4 to 10 from client 1.
+
+
+# a client asks for seperate chunks of a file in broadcast mode.
+# available senders send the chunk in question.
+# receiver listens all the time.
+# if 
+
+def get_cwd():
+    return str(os.path())
+
+def get_hash(data):
+    sha1 = hashlib.sha1(data)
+    result = sha1.hexdigest()
+    return result
+
+def generate_packet(type_, payload_, serial_, rwnd_, filename_):
+    packet = {
+        "NAME":MYNAME, 
+        "MY_IP": HOST, 
+        "TYPE": type_, 
+        "PAYLOAD": payload_
+        }
+    if len(serial_) > 0:
+        packet["SERIAL"] = serial_
+    if len(rwnd_) > 0:
+        packet["RWND"] = rwnd_
+    if type_ == "FILE":
+        packet["NAME"] = filename_
+    return packet
+
+def read_in_chunks(file_object, chunk_size):
+    while True:
+        data = file_object.read(chunk_size)
+        if not data:
+            break
+        yield data
+
+
+def get_temp(filename):
+    if os.path.isfile('{}.txt'.format(str(filename))):
+        with open('{}.txt'.format(str(filename))) as f:
+            shutil.rmtree('{}/{}_temp'.format(get_cwd(), str(filename)))
+            os.mkdir('{}_temp'.format(str(filename)))
+            os.chdir('{}/{}_temp'.format(get_cwd(), str(filename)))
+            index = 0
+            for chunk in read_in_chunks(f):
+                hash_ = get_hash(chunk)
+                chunk_file = open('{}_{}.txt'.format(index, hash_), 'w+')
+                chunk_file.write(chunk)
+                chunk_file.close()
+                index = index + 1
+            end = open('{}_end'.format(index), 'w')
+            end.close()
+
+
+def request_chunk(filename, serial):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(('', 0))
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    #sock.sendto(payloadBytes, ('<broadcast>', PORT))
+    packet = generate_packet("FILEREQ", "", serial, "")
+    sock.sendto(packet, ('25.255.255.255', PORT))
+
+
+def request_file():
+    filename = input("Name of the file:")
+    completed_chunks = []
+    hash_values = {} # {index: hash} 
+    # get has values somehow
+    curr_hash = 0
+    #while (not(hash_values['fin'] == curr_hash)):
+    for key in hash_values.keys:
+        request_chunk(filename, key)
+
+def send_chunk(incomingData):
+    f = open('{}_temp/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]), "r")
+    data = f.readlines()
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect((incomingData["MY_IP"], PORT))
+        packet = generate_packet("FILE", data, incomingData["SERIAL"], "", incomingData["FILENAME"])
+        packetBytes = json.dumps((packet)).encode('utf-8')
+        s.send(packetBytes) 
+        resp = s.recv(1024)
+        if resp:
+            print("ack arriveddddd!")
+            print(resp)
+        else:
+            print("ack didnt arrive")  
 
 
 def respond(incomingData):
@@ -113,8 +212,9 @@ def sendACK(incomingData, leftBuffer):
     sock.bind(('', 0))
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     # sock.sendto(payloadBytes, ('<broadcast>', PORT))
-    AckPackage['serial'] = incomingData["serial"]
-    AckPackage['rwnd'] = leftBuffer
+    AckPackage['SERIAL'] = incomingData["serial"]
+    AckPackage['RWND'] = leftBuffer
+    AckPackage['FILENAME'] = incomingData['FILENAME']
     AckPackageBytes = json.dumps((AckPackage)).encode('utf-8')
     sock.sendto(payloadBytes, ('25.255.255.255', PORT))
 
@@ -155,14 +255,19 @@ def receiveUDP():
                 if(incomingData["MY_IP"]== HOST):
                     continue
                 #print("receiving message")
+                if incomingData["TYPE"] == "FILEREQ":
+                    if (os.path.exists('{}_temp/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]))):
+                        send_chunk(incomingData)
+                else:
+                    pass
                 if (incomingData["TYPE"]=="FILE"):
-                    if (os.path. exists('chunks/'+incomingData["serial"]+'.txt')):
+                    if (os.path.exists('{}/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]))):
                         print("ALREADY HAVE THIS CHUNK")
                     else:
-                        if incomingData["serial"] == 0:
+                        if incomingData["SERIAL"] == 0:
                             putFileTogether("img")
                         else:
-                            chunk_file = open('chunks/'+incomingData["serial"]+'.txt', 'wb+')
+                            chunk_file = open('{}/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]), 'wb+')
                             chunk_file.write(incomingData["PAYLOAD"])
                             chunk_file.close()
                             #respond with ACK inclusing remaining buffer --> here hardcoded
