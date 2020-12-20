@@ -28,9 +28,9 @@ discoveredUsers = dict()
 payload = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "DISCOVER", "PAYLOAD":""})
 response = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "RESPOND", "PAYLOAD":""})
 message = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "MESSAGE", "PAYLOAD":""})
-filePackage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "FILE", "PAYLOAD":"", "serial":""})
-chunkPackage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "CHUNK", "PAYLOAD":"", "serial": ""})
-AckPackage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "ACK", "PAYLOAD":"", "serial":"", "rwnd": ""})
+filePackage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "FILE", "PAYLOAD":"", "SERIAL":""})
+chunkPackage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "CHUNK", "PAYLOAD":"", "SERIAL": ""})
+AckPackage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "ACK", "PAYLOAD":"", "SERIAL":"", "RWND": ""})
 
 goodbyeMessage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "GOODBYE", "PAYLOAD": ""})
 payloadBytes = json.dumps((payload)).encode('utf-8')
@@ -42,6 +42,8 @@ chunk_amounts = {}
 chunk_amounts_user = {}
 is_transfer_done = {}
 list_of_chunks_transfered = {}
+
+chunk_size = 100
 
 #DISCOVER
 def discover():
@@ -83,7 +85,7 @@ if(len(discoveredUsers)!=0):
 # if 
 
 def get_cwd():
-    return str(os.path())
+    return str(os.getcwd())
 
 def get_hash(data):
     sha1 = hashlib.sha1(data)
@@ -116,12 +118,12 @@ def read_in_chunks(file_object, chunk_size):
 def create_temp(filename):
     if os.path.isfile('{}.txt'.format(str(filename))):
         with open('{}.txt'.format(str(filename)), "rb") as f:
-            if (os.path.exists('{}_temp'.format(incomingData["FILENAME"]))):
+            if (os.path.exists('{}_temp'.format(filename))):
                 shutil.rmtree('{}/{}_temp'.format(get_cwd(), str(filename)))
             os.mkdir('{}_temp'.format(str(filename)))
             os.chdir('{}/{}_temp'.format(get_cwd(), str(filename)))
             index = 0
-            for chunk in read_in_chunks(f):
+            for chunk in read_in_chunks(f, chunk_size):
                 hash_ = get_hash(chunk)
                 chunk_file = open('{}.txt'.format(index), 'w+')
                 chunk = str(chunk, 'utf-8')
@@ -130,6 +132,7 @@ def create_temp(filename):
                 index = index + 1
             end = open('{}_end.txt'.format(index), 'w')
             end.close()
+            os.chdir("..")
         return True
     else:
         return False
@@ -171,7 +174,7 @@ def request_file():
 
         while not is_transfer_done[filename]:
             
-            list_of_chunks_to_request = [i for pair in list_of_chunks_to_request (if pair[1] not in list_of_chunks_transfered)]
+            list_of_chunks_to_request = [i for pair in list_of_chunks_to_request if pair[1] not in list_of_chunks_transfered]
 
             random_request = random.choice(list_of_chunks_to_request)
             request_chunk(filename, random_request[0], random_request[1])
@@ -268,7 +271,7 @@ def send_chunk_info(packet, receiver_ip):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(('', 0))
     packetBytes = json.dumps((packet)).encode('utf-8')
-    sock.sendto(packet, (receiver_ip, PORT))
+    sock.sendto(packetBytes, (receiver_ip, PORT))
     #sock.sendto(payloadBytes, ('25.255.255.255', PORT))
 
     print("chunk info sent!!!")
@@ -310,19 +313,23 @@ def receiveUDP():
                 if incomingData["TYPE"] == "CHUNK":
                     if incomingData["SERIAL"] == -1:
                         list_of_chunks = []
+                        print(incomingData)
                         if (os.path.exists('{}.txt'.format(incomingData["FILENAME"]))):
-                            create_temp()
-                            for filename in os.listdir('{}/{}_temp/'.format(get_cwd, incomingData["FILENAME"])):
-                                list_of_chunks.append(filename[:-3])
-                        elif (os.path.exists('{}/{}_temp/'.format(get_cwd, incomingData["FILENAME"]))):
-                            for filename in os.listdir('{}/{}_temp/'.format(get_cwd, incomingData["FILENAME"])):
-                                list_of_chunks.append(filename[:-3])
+                            create_temp(incomingData["FILENAME"])
+                            print(get_cwd())
+                            for filename in os.listdir('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"])):
+                                list_of_chunks.append(filename[:-4])
+                        elif (os.path.exists('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"]))):
+                            for filename in os.listdir('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"])):
+                                list_of_chunks.append(filename[:-4])
                         else:
                             pass
                         sender_ip = incomingData["MY_IP"]
                         respPackage = chunkPackage
                         respPackage["PAYLOAD"] = list_of_chunks
-                        respPackage["SERIAL"] = len(list_of_chunks)                           
+                        respPackage["SERIAL"] = len(list_of_chunks)   
+                        respPackage["FILENAME"] = incomingData["FILENAME"]                           
+
                         send_chunk_info(respPackage, sender_ip)
 
                     elif incomingData["SERIAL"] > 0:
@@ -351,7 +358,7 @@ def receiveUDP():
                             temp_list = list_of_chunks_transfered["FILENAME"]
                             temp_list.append(incomingData["SERIAL"])
                             list_of_chunks_transfered[incomingData["FILENAME"]] = temp_list
-                            if len(os.listdir('{}/{}_temp/'.format(get_cwd, incomingData["FILENAME"]))) == chunk_amounts[incomingData["FILENAME"]]:
+                            if len(os.listdir('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"]))) == chunk_amounts[incomingData["FILENAME"]]:
                                 is_transfer_done[incomingData["FILENAME"]] = True
                             #respond with ACK inclusing remaining buffer --> here hardcoded
                             sendACK(incomingData,1500)
