@@ -28,9 +28,9 @@ discoveredUsers = dict()
 payload = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "DISCOVER", "PAYLOAD":""})
 response = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "RESPOND", "PAYLOAD":""})
 message = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "MESSAGE", "PAYLOAD":""})
-filePackage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "FILE", "PAYLOAD":"", "serial":""})
-chunkPackage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "CHUNK", "PAYLOAD":"", "serial": ""})
-AckPackage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "ACK", "PAYLOAD":"", "serial":"", "rwnd": ""})
+filePackage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "FILE", "PAYLOAD":"", "SERIAL":""})
+chunkPackage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "CHUNK", "PAYLOAD":"", "SERIAL": ""})
+AckPackage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "ACK", "PAYLOAD":"", "SERIAL":"", "RWND": ""})
 
 goodbyeMessage = dict({"NAME":MYNAME, "MY_IP": HOST, "TYPE": "GOODBYE", "PAYLOAD": ""})
 payloadBytes = json.dumps((payload)).encode('utf-8')
@@ -83,7 +83,7 @@ if(len(discoveredUsers)!=0):
 # if 
 
 def get_cwd():
-    return str(os.path())
+    return str(os.getcwd())
 
 def get_hash(data):
     sha1 = hashlib.sha1(data)
@@ -97,11 +97,11 @@ def generate_packet(type_, payload_, serial_, rwnd_, filename_):
         "TYPE": type_, 
         "PAYLOAD": payload_
         }
-    if len(serial_) > 0:
+    if serial_:
         packet["SERIAL"] = serial_
     if len(rwnd_) > 0:
         packet["RWND"] = rwnd_
-    if type_ == "FILE":
+    if type_ == "FILE" or type_ == "CHUNK":
         packet["FILENAME"] = filename_
     return packet
 
@@ -164,6 +164,7 @@ def request_file():
         list_of_chunks_to_request = []
         list_of_users_with_chunks = chunk_amounts_user[filename]
         list_of_chunks_transfered[filename] = []
+        is_transfer_done[filename] = False
 
         for user in list_of_users_with_chunks:
             for chunk_id in user[1]:
@@ -171,19 +172,13 @@ def request_file():
 
         while not is_transfer_done[filename]:
             
-            list_of_chunks_to_request = [i for pair in list_of_chunks_to_request (if pair[1] not in list_of_chunks_transfered)]
+            list_of_chunks_to_request = [pair for pair in list_of_chunks_to_request if pair[1] not in list_of_chunks_transfered]
+            #out_tup = [i for i in in_tup if i[0] >= 50]
 
             random_request = random.choice(list_of_chunks_to_request)
             request_chunk(filename, random_request[0], random_request[1])
 
 #chunk_amounts_user = {"file1": [("userip1", [0, 1, 5, 6, 10]), ("userip2", [15 chunks])]   , "file2": ("userid2",5)}
-("userip1", 0)
-("userip1", 1)
-("userip1", 5)
-("userip1", 6)
-("userip1", 10)
-("userip2", 2)
-
 
 
 def send_chunk(incomingData):
@@ -313,10 +308,10 @@ def receiveUDP():
                         if (os.path.exists('{}.txt'.format(incomingData["FILENAME"]))):
                             create_temp()
                             for filename in os.listdir('{}/{}_temp/'.format(get_cwd, incomingData["FILENAME"])):
-                                list_of_chunks.append(filename[:-3])
+                                list_of_chunks.append(filename[:-4])
                         elif (os.path.exists('{}/{}_temp/'.format(get_cwd, incomingData["FILENAME"]))):
                             for filename in os.listdir('{}/{}_temp/'.format(get_cwd, incomingData["FILENAME"])):
-                                list_of_chunks.append(filename[:-3])
+                                list_of_chunks.append(filename[:-4])
                         else:
                             pass
                         sender_ip = incomingData["MY_IP"]
@@ -326,10 +321,11 @@ def receiveUDP():
                         send_chunk_info(respPackage, sender_ip)
 
                     elif incomingData["SERIAL"] > 0:
+                        print(incomingData)
                         temp_list = chunk_amounts_user[incomingData["FILENAME"]]
                         temp_list.append((incomingData["MY_IP"], incomingData["PAYLOAD"]))
                         chunk_amounts_user[incomingData["FILENAME"]] = temp_list
-                        chunk_amounts["FILENAME"] = max(incomingData["SERIAL"], chunk_amounts["FILENAME"])
+                        chunk_amounts[incomingData["FILENAME"]] = max(incomingData["SERIAL"], chunk_amounts[incomingData["FILENAME"]])
 
                 if incomingData["TYPE"] == "FILEREQ":
                     if (os.path.exists('{}_temp/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]))):
@@ -415,7 +411,7 @@ display_help()
 while(True):
     if (len(discoveredUsers)==0):
         print("no chat partner found yet")
-        time.sleep(10)
+        time.sleep(1)
         continue
     showPartners("SHOW")
     message_to_send =""
