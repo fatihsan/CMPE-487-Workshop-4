@@ -8,6 +8,7 @@ import select
 import hashlib
 import shutil
 import random
+import base64
 
 def get_ip_address():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -42,6 +43,7 @@ chunk_amounts = {}
 chunk_amounts_user = {}
 is_transfer_done = {}
 list_of_chunks_transfered = {}
+chunk_sent = 0
 
 #DISCOVER
 def discover():
@@ -91,17 +93,17 @@ def get_hash(data):
     return result
 
 def generate_packet(type_, payload_, serial_, rwnd_, filename_):
-    packet = {
+    packet = dict({
         "NAME":MYNAME, 
         "MY_IP": HOST, 
         "TYPE": type_, 
         "PAYLOAD": payload_
-        }
+        })
     if serial_:
         packet["SERIAL"] = serial_
     if len(rwnd_) > 0:
         packet["RWND"] = rwnd_
-    if type_ == "FILE" or type_ == "CHUNK":
+    if type_ == "FILE" or type_ == "CHUNK" or type_ == "FILEREQ":
         packet["FILENAME"] = filename_
     return packet
 
@@ -114,22 +116,20 @@ def read_in_chunks(file_object, chunk_size):
 
 
 def create_temp(filename):
-    if os.path.isfile('{}.txt'.format(str(filename))):
-        with open('{}.txt'.format(str(filename)), "rb") as f:
-            if (os.path.exists('{}_temp'.format(incomingData["FILENAME"]))):
+    if os.path.isfile('{}'.format(str(filename))):
+        with open('{}'.format(str(filename)), "rb") as f:
+            if (os.path.exists('{}_temp'.format(filename))):
                 shutil.rmtree('{}/{}_temp'.format(get_cwd(), str(filename)))
             os.mkdir('{}_temp'.format(str(filename)))
             os.chdir('{}/{}_temp'.format(get_cwd(), str(filename)))
             index = 0
-            for chunk in read_in_chunks(f):
+            for chunk in read_in_chunks(f, 1000):
                 hash_ = get_hash(chunk)
-                chunk_file = open('{}.txt'.format(index), 'w+')
-                chunk = str(chunk, 'utf-8')
+                chunk_file = open('{}.txt'.format(index), 'wb+')
                 chunk_file.write(chunk)
                 chunk_file.close()
                 index = index + 1
-            end = open('{}_end.txt'.format(index), 'w')
-            end.close()
+            os.chdir("..")
         return True
     else:
         return False
@@ -150,15 +150,22 @@ def request_chunk(filename, destination_ip, serial):
     sock.bind(('', 0))
     #sock.sendto(payloadBytes, ('<broadcast>', PORT))
     packet = generate_packet("FILEREQ", "", serial, "", filename)
-    packetBytes = json.dumps((packet)).encode('utf-8')
+    packetBytes = json.dumps(packet).encode('utf-8')
     sock.sendto(packetBytes, (destination_ip, PORT))
 
 def request_file():
     print("If you want to abort file request, type in ABORT")
     filename = input("Name of the file:")
+    file_type = ""
     if filename == "ABORT":
         pass
     else:
+        while ("." not in filename):
+            filename = input("Please type in the correct format.")
+        temp = filename.split(".")
+        file_type = temp[1]
+
+        chunk_amounts[filename] = 0
         request_chunk_info(filename)
         time.sleep(1)
         list_of_chunks_to_request = []
@@ -169,30 +176,36 @@ def request_file():
         for user in list_of_users_with_chunks:
             for chunk_id in user[1]:
                 list_of_chunks_to_request.append((user[0], chunk_id))
+        
 
         while not is_transfer_done[filename]:
+            #print("possible chunks to request :  "+ str(len(list_of_chunks_to_request)) )
+            for pair in list_of_chunks_to_request:
+                if pair[1] in list_of_chunks_transfered:
+                    list_of_chunks_to_request.remove(pair)
             
-            list_of_chunks_to_request = [pair for pair in list_of_chunks_to_request if pair[1] not in list_of_chunks_transfered]
-            #out_tup = [i for i in in_tup if i[0] >= 50]
-
             random_request = random.choice(list_of_chunks_to_request)
             request_chunk(filename, random_request[0], random_request[1])
-
-#chunk_amounts_user = {"file1": [("userip1", [0, 1, 5, 6, 10]), ("userip2", [15 chunks])]   , "file2": ("userid2",5)}
+    time.sleep(1)
+    putFileTogether(file_type, filename)
 
 
 def send_chunk(incomingData):
     f = open('{}_temp/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]), "rb")
-    data = f.readlines()
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect((incomingData["MY_IP"], PORT))
-        packet = generate_packet("FILE", data, incomingData["SERIAL"], "", incomingData["FILENAME"])
-        packetBytes = json.dumps((packet)).encode('utf-8')
-        for i in range(3):
-            s.send(packetBytes)
-            time.sleep(0.01)
-            if (incomingData["MY_ID"], incomingData["FILENAME"], incomingData["SERIAL"]) not in acks_received:
-                time.sleep(1)
+    data = f.read()
+    data_base64 = base64.encodebytes(data)
+
+    decoded = data_base64.decode('utf-8')
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(('', 0))
+    
+    packet = generate_packet("FILE", decoded, incomingData["SERIAL"], "", incomingData["FILENAME"])
+    packetBytes = json.dumps(packet).encode('utf-8')
+    print("acks received:  "+str(len(acks_received)))
+
+    sock.sendto(packetBytes, (incomingData["MY_IP"], PORT))
+
             
 
 def respond(incomingData):
@@ -250,11 +263,11 @@ def sendACK(incomingData, leftBuffer):
     sock.bind(('', 0))
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     # sock.sendto(payloadBytes, ('<broadcast>', PORT))
-    AckPackage['SERIAL'] = incomingData["serial"]
+    AckPackage['SERIAL'] = incomingData["SERIAL"]
     AckPackage['RWND'] = leftBuffer
     AckPackage['FILENAME'] = incomingData['FILENAME']
     AckPackageBytes = json.dumps((AckPackage)).encode('utf-8')
-    sock.sendto(payloadBytes, ('25.255.255.255', PORT))
+    sock.sendto(AckPackageBytes, (incomingData["MY_IP"], PORT))
 
     print("ack senttt!!!!")
     
@@ -263,30 +276,27 @@ def send_chunk_info(packet, receiver_ip):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(('', 0))
     packetBytes = json.dumps((packet)).encode('utf-8')
-    sock.sendto(packet, (receiver_ip, PORT))
+    sock.sendto(packetBytes, (receiver_ip, PORT))
     #sock.sendto(payloadBytes, ('25.255.255.255', PORT))
 
     print("chunk info sent!!!")
 
 
-def putFileTogether(dataformat):
-    list = os.listdir("chunks")  # dir is your directory path
-    number_files = len(list)
-    temp_file = open('temp.txt', 'wb+')
-    for i in number_files:
-        chunk_file = open(i+'.txt', 'rb')
-        temp_file.write(chunk_file)
+def putFileTogether(dataformat, filename):
+    temp_file = open('{}.txt'.format(filename), 'wb+')
+    chunk_list = os.listdir('{}/{}_temp/'.format(get_cwd(), filename))  # dir is your directory path
+    number_files = len(chunk_list)
+    os.chdir('{}/{}_temp/'.format(get_cwd(), filename))
+    for i in range(number_files):
+        chunk_file = open('{}.txt'.format(str(i)), 'rb')
+        data = chunk_file.read()
+        print(type(data))
+        temp_file.write(data)
 
-
-    if dataformat== "img":
-        with open('images/stitched_together.jpg', 'wb') as image:
-            for f in temp_file:
-                image.write(f)
-    pass
 
 
 def receiveUDP():
-    bufferSize = 1024
+    bufferSize = 1500
     print("listening to any UDP messages")
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.bind(('', PORT))
@@ -297,7 +307,9 @@ def receiveUDP():
             data = result[0][0].recv(bufferSize)
             #print(data)
             if data:
+                #print("data::   "+str(type(data)))
                 dataDecoded = data.decode('utf-8')
+                #print(data)
                 incomingData = json.loads(dataDecoded)
                 if(incomingData["MY_IP"]== HOST):
                     continue 
@@ -305,28 +317,29 @@ def receiveUDP():
                 if incomingData["TYPE"] == "CHUNK":
                     if incomingData["SERIAL"] == -1:
                         list_of_chunks = []
-                        if (os.path.exists('{}.txt'.format(incomingData["FILENAME"]))):
-                            create_temp()
-                            for filename in os.listdir('{}/{}_temp/'.format(get_cwd, incomingData["FILENAME"])):
+                        if (os.path.exists('{}'.format(incomingData["FILENAME"]))):
+                            create_temp(incomingData["FILENAME"])
+                            for filename in os.listdir('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"])):
                                 list_of_chunks.append(filename[:-4])
-                        elif (os.path.exists('{}/{}_temp/'.format(get_cwd, incomingData["FILENAME"]))):
-                            for filename in os.listdir('{}/{}_temp/'.format(get_cwd, incomingData["FILENAME"])):
+                        elif (os.path.exists('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"]))):
+                            for filename in os.listdir('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"])):
                                 list_of_chunks.append(filename[:-4])
                         else:
                             pass
                         sender_ip = incomingData["MY_IP"]
                         respPackage = chunkPackage
                         respPackage["PAYLOAD"] = list_of_chunks
-                        respPackage["SERIAL"] = len(list_of_chunks)                           
+                        respPackage["SERIAL"] = len(list_of_chunks)   
+                        respPackage["FILENAME"] = incomingData["FILENAME"]                          
+
                         send_chunk_info(respPackage, sender_ip)
 
                     elif incomingData["SERIAL"] > 0:
-                        print(incomingData)
                         temp_list = chunk_amounts_user[incomingData["FILENAME"]]
                         temp_list.append((incomingData["MY_IP"], incomingData["PAYLOAD"]))
                         chunk_amounts_user[incomingData["FILENAME"]] = temp_list
                         chunk_amounts[incomingData["FILENAME"]] = max(incomingData["SERIAL"], chunk_amounts[incomingData["FILENAME"]])
-
+                
                 if incomingData["TYPE"] == "FILEREQ":
                     if (os.path.exists('{}_temp/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]))):
                         send_chunk(incomingData)
@@ -335,22 +348,29 @@ def receiveUDP():
                 if incomingData["TYPE"] == "ACK":
                     acks_received.append((incomingData["MY_IP"], incomingData["FILENAME"], incomingData["SERIAL"]))
                 if (incomingData["TYPE"]=="FILE"):
-                    if (os.path.exists('{}/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]))):
+                    if (os.path.exists('{}/{}_temp/{}.txt'.format(get_cwd(), incomingData["FILENAME"], incomingData["SERIAL"]))):
                         print("ALREADY HAVE THIS CHUNK")
                     else:
-                        if incomingData["SERIAL"] == 0:
+                        if incomingData["SERIAL"] == -314235:
                             putFileTogether("img")
                         else:
-                            chunk_file = open('{}/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]), 'wb+')
-                            chunk_file.write(incomingData["PAYLOAD"])
+                            if not os.path.exists('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"])):
+                                os.mkdir('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"]))
+                            print("we are here "+ str(incomingData["SERIAL"]))
+                            os.chdir('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"]))
+                            chunk_file = open('{}.txt'.format(incomingData["SERIAL"]), 'wb+')
+                            encoded = incomingData["PAYLOAD"].encode('utf-8')
+                            decoded_base64 = base64.decodebytes(encoded)
+                            chunk_file.write(decoded_base64)
                             chunk_file.close()
-                            temp_list = list_of_chunks_transfered["FILENAME"]
+                            temp_list = list_of_chunks_transfered[incomingData["FILENAME"]]
                             temp_list.append(incomingData["SERIAL"])
                             list_of_chunks_transfered[incomingData["FILENAME"]] = temp_list
-                            if len(os.listdir('{}/{}_temp/'.format(get_cwd, incomingData["FILENAME"]))) == chunk_amounts[incomingData["FILENAME"]]:
-                                is_transfer_done[incomingData["FILENAME"]] = True
+                            os.chdir('..')
                             #respond with ACK inclusing remaining buffer --> here hardcoded
                             sendACK(incomingData,1500)
+                    if len(os.listdir('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"]))) == chunk_amounts[incomingData["FILENAME"]]:
+                        is_transfer_done[incomingData["FILENAME"]] = True
                 if (incomingData["TYPE"]=="DISCOVER"):
                     if ((incomingData["NAME"] in discoveredUsers)):
                         print("")
@@ -435,11 +455,3 @@ while(True):
     else:
         print("Couldn't find Chat-Partner. Please choose one of the following Names")
         #checkIfGoodbye(partnerName)
-
-
-
-
-
-
-
-
