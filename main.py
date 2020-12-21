@@ -45,7 +45,8 @@ chunk_amounts_user = {}
 is_transfer_done = {}
 list_of_chunks_transfered = {}
 chunk_sent = 0
-chunk_size = 1000
+chunk_size = 1300
+buffer_size = 15000
 
 #DISCOVER
 def discover():
@@ -55,7 +56,7 @@ def discover():
     sock.sendto(payloadBytes, ('<broadcast>', PORT))
     #sock.sendto(payloadBytes, ('25.255.255.255', PORT))
 
-    print("Discover Broadcast sent")
+    #print("Discover Broadcast sent")
 
 #Goodbye
 def goodbye():
@@ -125,7 +126,7 @@ def create_temp(filename):
             os.mkdir('{}_temp'.format(str(filename)))
             os.chdir('{}/{}_temp'.format(get_cwd(), str(filename)))
             index = 0
-            for chunk in read_in_chunks(f, chunk_size):
+            for chunk in read_in_chunks(f, 1000):
                 hash_ = get_hash(chunk)
                 chunk_file = open('{}.txt'.format(index), 'wb+')
                 chunk_file.write(chunk)
@@ -156,8 +157,9 @@ def request_chunk(filename, destination_ip, serial):
     sock.sendto(packetBytes, (destination_ip, PORT))
 
 def request_file():
+    print()
     print("If you want to abort file request, type in ABORT")
-    filename = input("Name of the file:")
+    filename = input("Name of the file(e.g: 'deneme.txt' or 'deneme.jpg'):  ")
     file_type = ""
     if filename == "ABORT":
         pass
@@ -188,7 +190,7 @@ def request_file():
             for pair in list_of_chunks_to_request:
                 if pair[1] in list_of_chunks_transfered[filename]:
                     list_of_chunks_to_request.remove(pair)
-            if time.time() - start > 5:
+            if time.time() - start > 10:
                 download = 0
                 print("Could not download file.")
                 break
@@ -245,7 +247,7 @@ def send_Message(name, messagePayload):
 
 
 def receiveTCP():
-    print("listening to any TCP messages")
+    #print("listening to any TCP messages")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((HOST, PORT))
@@ -309,15 +311,14 @@ def putFileTogether(dataformat, filename):
 
 
 def receiveUDP():
-    bufferSize = 1500
-    print("listening to any UDP messages")
+    #print("listening to any UDP messages")
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.bind(('', PORT))
         #s.setblocking(0)
 
         while True:
             result = select.select([s], [], [])
-            data = result[0][0].recv(bufferSize)
+            data = result[0][0].recv(buffer_size)
             #print(data)
             if data:
                 #print("data::   "+str(type(data)))
@@ -384,7 +385,7 @@ def receiveUDP():
                             list_of_chunks_transfered[incomingData["FILENAME"]] = temp_list
                             os.chdir('..')
                             #respond with ACK inclusing remaining buffer --> here hardcoded
-                            sendACK(incomingData,1500)
+                            sendACK(incomingData,buffer_size-chunk_size)
                     if len(os.listdir('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"]))) == chunk_amounts[incomingData["FILENAME"]]:
                         is_transfer_done[incomingData["FILENAME"]] = True
                 if (incomingData["TYPE"]=="DISCOVER"):
@@ -419,13 +420,13 @@ discover()
 
 def checkIfGoodbye(user_input):
     if (user_input == "GOODBYE"):
-
+        
         goodbye()
         goodbye()
         goodbye()
-        print("GOODBYE SENT")
-        time.sleep(5)
-        exit()
+        #print("GOODBYE SENT")
+        time.sleep(2)
+        handler()
 
 def showPartners(user_input):
     if (user_input == "SHOW"):
@@ -435,14 +436,15 @@ def showPartners(user_input):
                 print(user)
 
 def display_help():
-    print("to exit/stop Chat client at any time please type GOODBYE")
-    print("to show available partners type in SHOW")
-    print("to request a file type in FILE")
-    print("to get the command list, type in HELP")
+    print()
+    print("GOODBYE to exit/stop Chat client at any time")
+    print("SHOW to view available partners")
+    print("FILE to request a file")
+    print("HELP to get the command list")
+    print()
 
 
 def handler(signum, frame):
-    print ('Ctrl+Z pressed, but ignored')
     rootdir = get_cwd()
     for subdir, dirs, files in os.walk(rootdir):
         for dir in dirs:
@@ -459,11 +461,11 @@ display_help()
 while(True):
     if (len(discoveredUsers)==0):
         print("no chat partner found yet")
-        time.sleep(1)
+        time.sleep(3)
         continue
     showPartners("SHOW")
     message_to_send =""
-    partnerName = input("To send a Message type in the Name of a Chat partner")
+    partnerName = input("To send a Message type in the Name of a Chat partner:  ")
     checkIfGoodbye(partnerName)
     #print("this is his NAme: "+partnerName)
     if partnerName == "FILE":
@@ -483,4 +485,3 @@ while(True):
     else:
         print("Couldn't find Chat-Partner. Please choose one of the following Names")
         #checkIfGoodbye(partnerName)
-
