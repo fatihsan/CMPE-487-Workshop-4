@@ -215,7 +215,7 @@ def send_chunk(incomingData):
     
     packet = generate_packet("FILE", decoded, incomingData["SERIAL"], "", incomingData["FILENAME"])
     packetBytes = json.dumps(packet).encode('utf-8')
-    print("acks received:  "+str(len(acks_received)))
+    #print("acks received:  "+str(len(acks_received)))
 
     sock.sendto(packetBytes, (incomingData["MY_IP"], PORT))
 
