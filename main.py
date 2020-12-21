@@ -9,6 +9,7 @@ import hashlib
 import shutil
 import random
 import base64
+import signal
 
 def get_ip_address():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -44,6 +45,7 @@ chunk_amounts_user = {}
 is_transfer_done = {}
 list_of_chunks_transfered = {}
 chunk_sent = 0
+chunk_size = 1000
 
 #DISCOVER
 def discover():
@@ -123,7 +125,7 @@ def create_temp(filename):
             os.mkdir('{}_temp'.format(str(filename)))
             os.chdir('{}/{}_temp'.format(get_cwd(), str(filename)))
             index = 0
-            for chunk in read_in_chunks(f, 1000):
+            for chunk in read_in_chunks(f, chunk_size):
                 hash_ = get_hash(chunk)
                 chunk_file = open('{}.txt'.format(index), 'wb+')
                 chunk_file.write(chunk)
@@ -176,18 +178,27 @@ def request_file():
         for user in list_of_users_with_chunks:
             for chunk_id in user[1]:
                 list_of_chunks_to_request.append((user[0], chunk_id))
-        
-
+        download = 1
+        start = time.time()
+        print("Trying to download the file....")
         while not is_transfer_done[filename]:
             #print("possible chunks to request :  "+ str(len(list_of_chunks_to_request)) )
-            for pair in list_of_chunks_to_request:
-                if pair[1] in list_of_chunks_transfered:
-                    list_of_chunks_to_request.remove(pair)
+            #print("chunks transfered :  "+ str(len(list_of_chunks_transfered[filename])) )
             
-            random_request = random.choice(list_of_chunks_to_request)
-            request_chunk(filename, random_request[0], random_request[1])
-    time.sleep(1)
-    putFileTogether(file_type, filename)
+            for pair in list_of_chunks_to_request:
+                if pair[1] in list_of_chunks_transfered[filename]:
+                    list_of_chunks_to_request.remove(pair)
+            if time.time() - start > 5:
+                download = 0
+                print("Could not download file.")
+                break
+            if len(list_of_chunks_to_request) > 0:
+                random_request = random.choice(list_of_chunks_to_request)
+                request_chunk(filename, random_request[0], random_request[1])
+        time.sleep(1)
+        if download:
+            print("Download successful!")
+            putFileTogether(file_type, filename)
 
 
 def send_chunk(incomingData):
@@ -269,7 +280,7 @@ def sendACK(incomingData, leftBuffer):
     AckPackageBytes = json.dumps((AckPackage)).encode('utf-8')
     sock.sendto(AckPackageBytes, (incomingData["MY_IP"], PORT))
 
-    print("ack senttt!!!!")
+    #print("ack senttt!!!!")
     
 
 def send_chunk_info(packet, receiver_ip):
@@ -283,15 +294,17 @@ def send_chunk_info(packet, receiver_ip):
 
 
 def putFileTogether(dataformat, filename):
-    temp_file = open('{}.txt'.format(filename), 'wb+')
+    temp_file = open('{}'.format(filename), 'wb+')
     chunk_list = os.listdir('{}/{}_temp/'.format(get_cwd(), filename))  # dir is your directory path
     number_files = len(chunk_list)
     os.chdir('{}/{}_temp/'.format(get_cwd(), filename))
     for i in range(number_files):
         chunk_file = open('{}.txt'.format(str(i)), 'rb')
         data = chunk_file.read()
-        print(type(data))
         temp_file.write(data)
+    os.chdir("..")
+    if (os.path.exists('{}_temp'.format(filename))):
+        shutil.rmtree('{}/{}_temp'.format(get_cwd(), str(filename)))
 
 
 
@@ -341,6 +354,8 @@ def receiveUDP():
                         chunk_amounts[incomingData["FILENAME"]] = max(incomingData["SERIAL"], chunk_amounts[incomingData["FILENAME"]])
                 
                 if incomingData["TYPE"] == "FILEREQ":
+                    if (os.path.exists('{}'.format(incomingData["FILENAME"])) and not os.path.exists('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"]))):
+                        send_chunk(incomingData)
                     if (os.path.exists('{}_temp/{}.txt'.format(incomingData["FILENAME"], incomingData["SERIAL"]))):
                         send_chunk(incomingData)
                     else:
@@ -349,14 +364,15 @@ def receiveUDP():
                     acks_received.append((incomingData["MY_IP"], incomingData["FILENAME"], incomingData["SERIAL"]))
                 if (incomingData["TYPE"]=="FILE"):
                     if (os.path.exists('{}/{}_temp/{}.txt'.format(get_cwd(), incomingData["FILENAME"], incomingData["SERIAL"]))):
-                        print("ALREADY HAVE THIS CHUNK")
+                        #print("ALREADY HAVE THIS CHUNK")
+                        pass
                     else:
                         if incomingData["SERIAL"] == -314235:
                             putFileTogether("img")
                         else:
                             if not os.path.exists('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"])):
                                 os.mkdir('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"]))
-                            print("we are here "+ str(incomingData["SERIAL"]))
+                            #print("we are here "+ str(incomingData["SERIAL"]))
                             os.chdir('{}/{}_temp/'.format(get_cwd(), incomingData["FILENAME"]))
                             chunk_file = open('{}.txt'.format(incomingData["SERIAL"]), 'wb+')
                             encoded = incomingData["PAYLOAD"].encode('utf-8')
@@ -425,7 +441,19 @@ def display_help():
     print("to get the command list, type in HELP")
 
 
+def handler(signum, frame):
+    print ('Ctrl+Z pressed, but ignored')
+    rootdir = get_cwd()
+    for subdir, dirs, files in os.walk(rootdir):
+        for dir in dirs:
+            check = os.path.join(subdir, dir)
+            if check[-5:] == "_temp":
+                os.rmdir(check)
+    exit()
+1
 partnerName =""
+signal.signal(signal.SIGINT, handler)
+signal.signal(signal.SIGTSTP, handler)
 display_help()
 
 while(True):
