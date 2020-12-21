@@ -33,7 +33,7 @@
 
 
 ####TEST
-tested Functionalities with: txt,jpg,jpeg files
+tested Functionalities with: txt, jpg, jpeg file types
 - Firat Bulut
 - Fatih Ihsan Yilmaz
 - Tahir Kaan Ögel 
