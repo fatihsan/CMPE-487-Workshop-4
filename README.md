@@ -25,7 +25,7 @@
 
 - if chat functionality is chosen you can enter your message after entering the chat partner name
 - if Torrent functionality is chosen You'll land in the File Request menue where you then can enter the Name of the FIle you want (includiing the datatype --> .txt or .jpg is supported at this point)
-- when the transmission is done temp file will be deleted from reciving part. Also when program closing temp files will be delete.
+- when the transmission is done temp file will be deleted from reciving part. Also when program close temp files will be delete.
 
 - you can always use `EXIT` to go back to Menu
 - as well as `GOODBYE` to close client and show everyone that you're offline
@@ -33,7 +33,7 @@
 
 
 ####TEST
-tested Functionalities with: txt,jpg,jpeg files
+tested Functionalities with: txt, jpg, jpeg file types
 - Firat Bulut
 - Fatih Ihsan Yilmaz
 - Tahir Kaan Ögel 
